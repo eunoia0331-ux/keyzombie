@@ -237,7 +237,7 @@ async function findBrowningEvidence(message) {
       {
         method: "POST",
         headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ query: message.slice(0, 2000), topN: 4, scoreThreshold: 0.6 }),
+        body: JSON.stringify({ query: message.slice(0, 2000), topN: 4, scoreThreshold: 0.30 }),
       },
       8000,
     );
