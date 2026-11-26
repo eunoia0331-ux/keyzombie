@@ -197,11 +197,16 @@ async function chat(request, response) {
     }
 
     if (evidence?.directComparison === false) {
-      textResponse += "\n\nOpenAlex에서 검색한 논문의 제목과 초록 범위에서는 사과를 물과 레몬즙에 각각 담가 갈변을 직접 비교한 연구를 확인하지 못했습니다.";
+      const comparison = evidence.highPressure
+        ? "갓 자른 사과의 고압 처리군과 무처리군의 갈변을 직접 비교한 연구"
+        : "사과를 물과 레몬즙에 각각 담가 갈변을 직접 비교한 연구";
+      textResponse += "\n\nOpenAlex에서 검색한 논문의 제목과 초록 범위에서는 " + comparison + "를 확인하지 못했습니다.";
     }
     if (evidence?.papers?.length) {
       const heading = evidence.directComparison
-        ? "OpenAlex 초록에서 물·레몬즙 처리 비교를 확인한 논문 (제목·DOI):"
+        ? evidence.highPressure
+          ? "OpenAlex 초록에서 고압 처리군과 무처리군의 갈변 비교를 확인한 논문 (제목·DOI):"
+          : "OpenAlex 초록에서 물·레몬즙 처리 비교를 확인한 논문 (제목·DOI):"
         : "OpenAlex 관련 읽을거리 (제목·DOI):";
       textResponse += "\n\n" + heading + "\n" +
         evidence.papers.map(({ title, doi }) => `• ${title} — ${doi}`).join("\n");
@@ -274,8 +279,10 @@ async function findBrowningEvidence(message) {
 }
 
 const PULSED_LIGHT = /펄스\s*(?:광|빛)|광\s*펄스|\bpulsed\s+light\b/i;
+const HIGH_PRESSURE = /고압|\bhigh[-\s]+(?:hydrostatic[-\s]+)?pressure\b|\b(?:HHP|HPP)\b/i;
 const BROWNING_TREATMENTS = [
   PULSED_LIGHT,
+  HIGH_PRESSURE,
   /레몬(?:\s*즙)?|\blemon(?: fruit)? juice\b/i,
   /구연산|\bcitric acid\b/i,
   /아스코르브산?|비타민\s*C|\b(?:ascorbic acid|vitamin C)\b/i,
@@ -340,6 +347,32 @@ async function searchOpenAlex(message) {
       ));
       return { status: papers.length ? "openalex" : "no-results", papers };
     }
+    if (HIGH_PRESSURE.test(message)) {
+      const works = await searchOpenAlexWorks(
+        '(apple OR apples OR "Malus domestica") AND ("high pressure" OR "hydrostatic pressure" OR "high-pressure processing") AND (browning OR color OR colour)', 25,
+      );
+      const CUT_APPLE = /\b(?:fresh[- ]cut|cut|sliced) apples?\b|\bapple (?:slices?|wedges?|pieces?|discs?)\b/i;
+      const BROWNING = /\bbrown(?:ing|ed)?\b|\bdiscolou?r\w*\b/i;
+      const UNTREATED = /\b(?:untreated|unprocessed|non[- ]pressuri[sz]ed|non[- ]treated|without (?:pressure|pressuri[sz]ation))\b/i;
+      const candidates = works.flatMap(work => {
+        const abstract = openAlexAbstract(work);
+        if (!isAppleBrowningWork(work, abstract) || !HIGH_PRESSURE.test(work.display_name) ||
+            /\b(?:juice|pur[ée]e)\b/i.test(work.display_name)) return [];
+        const passages = abstract.match(/[^.!?]+(?:[.!?]|$)/g) ?? [];
+        const direct = CUT_APPLE.test(work.display_name + " " + abstract) &&
+          passages.some(passage => HIGH_PRESSURE.test(passage) && UNTREATED.test(passage) && BROWNING.test(passage));
+        return [{ work, direct, cut: CUT_APPLE.test(work.display_name + " " + abstract) }];
+      });
+      const direct = candidates.filter(candidate => candidate.direct);
+      const related = [...candidates.filter(candidate => candidate.cut), ...candidates.filter(candidate => !candidate.cut)];
+      return {
+        status: "openalex",
+        highPressure: true,
+        directComparison: direct.length > 0,
+        papers: openAlexPapers((direct.length ? direct : related).map(candidate => candidate.work)),
+      };
+    }
+
     const compareLemonAndWater = /레몬즙|\blemon juice\b/i.test(message) &&
       /(?:물에|물로|물과|물 처리|물 대조|\bwater\b)/i.test(message);
     if (compareLemonAndWater) {
