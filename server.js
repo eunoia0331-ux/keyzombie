@@ -305,7 +305,7 @@ async function searchOpenAlex(message) {
       /(?:물에|물로|물과|물 처리|물 대조|\bwater\b)/i.test(message);
     if (compareLemonAndWater) {
       const candidates = await searchOpenAlexWorks(
-        APPLE_BROWNING_SEARCH + ' AND ("lemon juice" OR "Citrus limon juice") AND (water OR control)', 25,
+        APPLE_BROWNING_SEARCH + ' AND (("lemon juice" AND (water OR control)) OR "citric acid" OR "ascorbic acid")', 25,
       );
       const direct = candidates.filter(work => {
         const abstract = openAlexAbstract(work);
@@ -318,10 +318,7 @@ async function searchOpenAlex(message) {
       });
       if (direct.length) return { status: "openalex", directComparison: true, papers: openAlexPapers(direct) };
 
-      const related = await searchOpenAlexWorks(
-        APPLE_BROWNING_SEARCH + ' AND ("lemon juice" OR "citric acid" OR "ascorbic acid")', 25,
-      );
-      const topical = [...candidates, ...related].filter(work => {
+      const topical = candidates.filter(work => {
         const abstract = openAlexAbstract(work);
         return isAppleBrowningWork(work, abstract) &&
           /lemon juice|citric acid|ascorbic acid|anti[- ]?browning/i.test(work.display_name + " " + abstract);
@@ -336,7 +333,7 @@ async function searchOpenAlex(message) {
     const papers = openAlexPapers(await searchOpenAlexWorks(query, 5));
     return { status: papers.length ? "openalex" : "no-results", papers };
   } catch (error) {
-    console.warn("OpenAlex search failed:", error.name);
+    console.warn("OpenAlex search failed:", error.status ?? error.name);
     return { status: "openalex-error" };
   }
 }
@@ -351,7 +348,7 @@ async function searchOpenAlexWorks(query, limit) {
   });
   if (process.env.OPENALEX_API_KEY) url.searchParams.set("api_key", process.env.OPENALEX_API_KEY);
   const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) throw Object.assign(new Error("OpenAlex request failed"), { status: response.status });
   const { results } = await response.json();
   if (!Array.isArray(results)) throw new Error("Invalid OpenAlex response");
   return results.filter(work => typeof work?.display_name === "string" && work.display_name.trim() &&
