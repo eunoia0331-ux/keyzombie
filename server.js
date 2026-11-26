@@ -269,10 +269,23 @@ function registeredBrowningChunks(results, message) {
   return (Array.isArray(results) ? results : []).flatMap(result => {
     const text = result?.text ?? result?.chunk ?? result?.metadata?.text;
     if (typeof text !== "string") return [];
-    if (!/사과|\bapples?\b/i.test(text) || !/갈변|browning/i.test(text)) return [];
-    if (treatmentQuestion && !/레몬|구연산|아스코르브|lemon|citric acid|ascorbic acid/i.test(text)) return [];
-    const title = result.metadata?.title ?? result.title ?? result.chunkSource;
-    return [{ title: typeof title === "string" ? title.slice(0, 300) : "", text: text.slice(0, 1800) }];
+    const metadata = result.metadata ?? result;
+    const title = metadata.title ?? result.title ?? result.chunkSource;
+    const identity = [title, metadata.url, metadata.chunkSource, metadata.docSource].filter(Boolean).join(" ");
+    const isApplePpoPaper = /10\.3389[/.\-_]fchem\.2018\.00203|fchem-06-00203|polyphenol oxidase from apple juice/i.test(identity);
+    const passage = text + "\n" + identity;
+    const hasApple = /사과|\bapples?\b/i.test(passage);
+    const hasBrowning = /갈변|brown(?:ing)?|퀴논|quinones?/i.test(passage);
+    if (treatmentQuestion) {
+      if (!hasApple || !hasBrowning || !/레몬|구연산|아스코르브|lemon|citric acid|ascorbic acid/i.test(text)) return [];
+    } else if (!(hasApple && hasBrowning) && !isApplePpoPaper) {
+      return [];
+    }
+    if (!text.trim()) return [];
+    const sourceTitle = isApplePpoPaper
+      ? "Aggregation and Conformational Changes in Native and Thermally Treated Polyphenol Oxidase From Apple Juice (Malus domestica) — https://doi.org/10.3389/fchem.2018.00203"
+      : title;
+    return [{ title: typeof sourceTitle === "string" ? sourceTitle.slice(0, 300) : "", text: text.slice(0, 1800) }];
   }).slice(0, 4);
 }
 
