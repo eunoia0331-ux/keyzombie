@@ -237,17 +237,17 @@ async function findBrowningEvidence(message) {
       {
         method: "POST",
         headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ query: /레몬|산도|산성|pH|물 처리|ascorbic|lemon/i.test(message)
+        body: JSON.stringify({ query: /레몬|산도|산성|\bpH\b|물 처리|ascorbic|lemon/i.test(message)
           ? `${message.slice(0, 1500)}\nApple enzymatic browning, lemon juice, citric acid, ascorbic acid, and water treatment`
           : `${message.slice(0, 1500)}\nApple enzymatic browning, polyphenol oxidase (PPO), oxygen, and quinone formation`,
-        topN: 8, scoreThreshold: 0.15 }),
+        topN: 12, scoreThreshold: 0 }),
       },
       8000,
     );
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const { results } = await response.json();
     if (!Array.isArray(results)) throw new Error("Invalid vector-search response");
-    const treatmentQuestion = /레몬|산도|산성|pH|물 처리|ascorbic|lemon/i.test(message);
+    const treatmentQuestion = /레몬|산도|산성|\bpH\b|물 처리|ascorbic|lemon/i.test(message);
     const chunks = results.filter(result => typeof result?.text === "string" &&
       /사과|\bapples?\b/i.test(result.text) &&
       /갈변|browning/i.test(result.text) &&
@@ -265,7 +265,7 @@ async function findBrowningEvidence(message) {
 
   try {
     // Use topical keywords so student records never leave the app for OpenAlex.
-    const query = /레몬|산도|산성|pH|물 처리|ascorbic|lemon/i.test(message)
+    const query = /레몬|산도|산성|\bpH\b|물 처리|ascorbic|lemon/i.test(message)
       ? "apple enzymatic browning polyphenol oxidase citric acid ascorbic acid"
       : "apple enzymatic browning polyphenol oxidase";
     const url = new URL("https://api.openalex.org/works");
