@@ -273,8 +273,26 @@ async function findBrowningEvidence(message) {
 
 }
 
+const PULSED_LIGHT = /펄스\s*(?:광|빛)|광\s*펄스|\bpulsed\s+light\b/i;
+const BROWNING_TREATMENTS = [
+  PULSED_LIGHT,
+  /레몬(?:\s*즙)?|\blemon(?: fruit)? juice\b/i,
+  /구연산|\bcitric acid\b/i,
+  /아스코르브산?|비타민\s*C|\b(?:ascorbic acid|vitamin C)\b/i,
+  /산도|산성|\bpH\b/i,
+  /(?:소금물|식염수|염화나트륨)|\b(?:salt\s*water|saline|sodium chloride)\b/i,
+  /식초|아세트산|\b(?:vinegar|acetic acid)\b/i,
+  /초음파|\bultrasound\b/i,
+  /자외선|\b(?:UV(?:-C)?|ultraviolet)\b/i,
+  /가열|열처리|\b(?:thermal treatment|heat treatment|blanching)\b/i,
+];
+const SPECIFIC_TREATMENT = /처리|처치|담그|담가|담근|대조군|비교|억제제|방지제|\b(?:treat\w*|control|compar\w*|dip\w*|immers\w*|soak\w*|inhibitor)\b/i;
+const ASKS_FOR_WATER = /물에|물로|물과|물 처리|물 대조|\bwater\b/i;
+
 function registeredBrowningChunks(results, message) {
-  const treatmentQuestion = /레몬|산도|산성|\bpH\b|물 처리|ascorbic|lemon/i.test(message);
+  const requestedTreatments = BROWNING_TREATMENTS.filter(pattern => pattern.test(message));
+  const treatmentQuestion = requestedTreatments.length > 0 || SPECIFIC_TREATMENT.test(message);
+  if (treatmentQuestion && !requestedTreatments.length) return [];
   return (Array.isArray(results) ? results : []).flatMap(result => {
     const text = result?.text ?? result?.chunk ?? result?.metadata?.text;
     if (typeof text !== "string") return [];
@@ -286,7 +304,9 @@ function registeredBrowningChunks(results, message) {
     const hasApple = /사과|\bapples?\b/i.test(passage);
     const hasBrowning = /갈변|brown(?:ing)?|퀴논|quinones?/i.test(passage);
     if (treatmentQuestion) {
-      if (!hasApple || !hasBrowning || !/레몬|구연산|아스코르브|lemon|citric acid|ascorbic acid/i.test(text)) return [];
+      if (!hasApple || !hasBrowning || !requestedTreatments.every(pattern => pattern.test(text))) return [];
+      const isUbcPaper = /ojs\.library\.ubc\.ca.{0,160}197341.{0,30}192115/i.test(identity);
+      if (ASKS_FOR_WATER.test(message) && !isUbcPaper && !WATER_TREATMENT.test(text)) return [];
     } else if (!(hasApple && hasBrowning) && !isApplePpoPaper) {
       return [];
     }
@@ -311,6 +331,15 @@ const WATER_TREATMENT = /\b(?:distilled|deionized|tap|plain) water\b|\bwater[- ]
 
 async function searchOpenAlex(message) {
   try {
+    if (PULSED_LIGHT.test(message)) {
+      const works = await searchOpenAlexWorks(
+        '(apple OR apples OR "Malus domestica") AND "pulsed light" AND (browning OR colour OR color)', 15,
+      );
+      const papers = openAlexPapers(works.filter(work =>
+        /\b(?:apples?|Malus domestica)\b/i.test(work.display_name) && PULSED_LIGHT.test(work.display_name),
+      ));
+      return { status: papers.length ? "openalex" : "no-results", papers };
+    }
     const compareLemonAndWater = /레몬즙|\blemon juice\b/i.test(message) &&
       /(?:물에|물로|물과|물 처리|물 대조|\bwater\b)/i.test(message);
     if (compareLemonAndWater) {
