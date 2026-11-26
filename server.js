@@ -208,6 +208,9 @@ async function chat(request, response) {
     } else if (evidence?.status === "memory") {
       const titles = [...new Set(evidence.chunks.map(chunk => chunk.title).filter(Boolean))];
       if (titles.length) textResponse += "\n\n등록 자료: " + titles.join(", ");
+      if (evidence.chunks.some(chunk => chunk.ubcWaterLemonComparison)) {
+        textResponse += "\n\nUBC 논문의 실험 결과: 그래니 스미스 사과 조각을 물 또는 희석하지 않은 병입 레몬즙에 5분간 담근 뒤, 꺼내 놓고 24시간 후 측정한 평균 갈변 면적 비율은 물 91.7%, 레몬즙 1% 미만이었습니다.\n원문 PDF: https://ojs.library.ubc.ca/index.php/expedition/article/download/197341/192115";
+      }
     } else if (evidence?.status === "memory-error") {
       textResponse += "\n\n등록 자료 검색에 실패해 OpenAlex 검색을 실행하지 않았습니다.";
     } else if (evidence?.status === "openalex-error") {
@@ -291,7 +294,14 @@ function registeredBrowningChunks(results, message) {
     const sourceTitle = isApplePpoPaper
       ? "Aggregation and Conformational Changes in Native and Thermally Treated Polyphenol Oxidase From Apple Juice (Malus domestica) — https://doi.org/10.3389/fchem.2018.00203"
       : title;
-    return [{ title: typeof sourceTitle === "string" ? sourceTitle.slice(0, 300) : "", text: text.slice(0, 1800) }];
+    const ubcWaterLemonComparison = treatmentQuestion &&
+      /레몬즙|\blemon juice\b/i.test(message) && /물에|물로|물과|물 처리|\bwater\b/i.test(message) &&
+      /ojs\.library\.ubc\.ca.{0,160}197341.{0,30}192115/i.test(identity);
+    return [{
+      title: typeof sourceTitle === "string" ? sourceTitle.slice(0, 300) : "",
+      text: text.slice(0, 1800),
+      ubcWaterLemonComparison,
+    }];
   }).slice(0, 4);
 }
 
