@@ -237,14 +237,22 @@ async function findBrowningEvidence(message) {
       {
         method: "POST",
         headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ query: message.slice(0, 2000), topN: 4, scoreThreshold: 0.30 }),
+        body: JSON.stringify({ query: /레몬|산도|산성|pH|물 처리|ascorbic|lemon/i.test(message)
+          ? `${message.slice(0, 1500)}\nApple enzymatic browning, lemon juice, citric acid, ascorbic acid, and water treatment`
+          : `${message.slice(0, 1500)}\nApple enzymatic browning, polyphenol oxidase (PPO), oxygen, and quinone formation`,
+        topN: 8, scoreThreshold: 0.15 }),
       },
       8000,
     );
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const { results } = await response.json();
     if (!Array.isArray(results)) throw new Error("Invalid vector-search response");
-    const chunks = results.filter(result => typeof result?.text === "string" && result.text.trim())
+    const treatmentQuestion = /레몬|산도|산성|pH|물 처리|ascorbic|lemon/i.test(message);
+    const chunks = results.filter(result => typeof result?.text === "string" &&
+      /사과|\bapples?\b/i.test(result.text) &&
+      /갈변|browning/i.test(result.text) &&
+      (!treatmentQuestion || /레몬|구연산|아스코르브|lemon|citric acid|ascorbic acid/i.test(result.text)),
+    ).slice(0, 4)
       .map(result => ({
         title: typeof result.metadata?.title === "string" ? result.metadata.title.slice(0, 300) : "",
         text: result.text.slice(0, 1800),
