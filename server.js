@@ -371,7 +371,8 @@ function openAlexAbstract(work) {
 
 function isAppleBrowningWork(work, abstract) {
   const text = `${work.display_name} ${abstract}`;
-  return /\b(?:apples?|Malus domestica)\b/i.test(text.replace(/\b(?:cashew|custard|wood|rose) apples?\b/gi, "")) &&
+  const title = work.display_name.replace(/\b(?:cashew|custard|wood|rose) apples?\b/gi, "");
+  return /\b(?:apples?|Malus domestica)\b/i.test(title) &&
     /\bbrown(?:ing)?\b|\bpolyphenol oxidase\b/i.test(text);
 }
 
