@@ -196,8 +196,14 @@ async function chat(request, response) {
       });
     }
 
+    if (evidence?.directComparison === false) {
+      textResponse += "\n\nOpenAlex에서 검색한 논문의 제목과 초록 범위에서는 사과를 물과 레몬즙에 각각 담가 갈변을 직접 비교한 연구를 확인하지 못했습니다.";
+    }
     if (evidence?.papers?.length) {
-      textResponse += "\n\nOpenAlex에서 찾은 관련 논문 (제목·DOI):\n" +
+      const heading = evidence.directComparison
+        ? "OpenAlex 초록에서 물·레몬즙 처리 비교를 확인한 논문 (제목·DOI):"
+        : "OpenAlex 관련 읽을거리 (제목·DOI):";
+      textResponse += "\n\n" + heading + "\n" +
         evidence.papers.map(({ title, doi }) => `• ${title} — ${doi}`).join("\n");
     } else if (evidence?.status === "memory") {
       const titles = [...new Set(evidence.chunks.map(chunk => chunk.title).filter(Boolean))];
@@ -289,36 +295,94 @@ function registeredBrowningChunks(results, message) {
   }).slice(0, 4);
 }
 
+const APPLE_BROWNING_SEARCH = "(apple OR apples OR \"Malus domestica\") AND (browning OR \"polyphenol oxidase\")";
+const LEMON_JUICE = /\blemon(?: fruit)? juice\b|\bcitrus limon juice\b|레몬즙/i;
+const WATER_TREATMENT = /\b(?:distilled|deionized|tap|plain) water\b|\bwater[- ](?:treated|dipped|immersed|control)\b|\b(?:in|with) water\b|\bwater (?:as|served as|was used as) (?:a |the )?control\b/i;
+
 async function searchOpenAlex(message) {
   try {
+    const compareLemonAndWater = /레몬즙|\blemon juice\b/i.test(message) &&
+      /(?:물에|물로|물과|물 처리|물 대조|\bwater\b)/i.test(message);
+    if (compareLemonAndWater) {
+      const candidates = await searchOpenAlexWorks(
+        APPLE_BROWNING_SEARCH + ' AND ("lemon juice" OR "Citrus limon juice") AND (water OR control)', 25,
+      );
+      const direct = candidates.filter(work => {
+        const abstract = openAlexAbstract(work);
+        if (!isAppleBrowningWork(work, abstract)) return false;
+        // Require evidence the two liquids were experimental treatments in the same passage.
+        return abstract.split(/(?<=[.!?])\s+/).some(sentence =>
+          LEMON_JUICE.test(sentence) && WATER_TREATMENT.test(sentence) &&
+          /\b(?:control|compar\w*|treat\w*|dip\w*|immers\w*|soak\w*)\b/i.test(sentence),
+        );
+      });
+      if (direct.length) return { status: "openalex", directComparison: true, papers: openAlexPapers(direct) };
+
+      const related = await searchOpenAlexWorks(
+        APPLE_BROWNING_SEARCH + ' AND ("lemon juice" OR "citric acid" OR "ascorbic acid")', 25,
+      );
+      const topical = [...candidates, ...related].filter(work => {
+        const abstract = openAlexAbstract(work);
+        return isAppleBrowningWork(work, abstract) &&
+          /lemon juice|citric acid|ascorbic acid|anti[- ]?browning/i.test(work.display_name + " " + abstract);
+      });
+      return { status: "openalex", directComparison: false, papers: openAlexPapers(topical) };
+    }
+
     // Use topical keywords so student records never leave the app for OpenAlex.
     const query = /레몬|산도|산성|\bpH\b|물 처리|ascorbic|lemon/i.test(message)
       ? "apple enzymatic browning polyphenol oxidase citric acid ascorbic acid"
       : "apple enzymatic browning polyphenol oxidase";
-    const url = new URL("https://api.openalex.org/works");
-    url.search = new URLSearchParams({
-      search: query,
-      filter: "has_doi:true,type:article",
-      select: "display_name,doi",
-      per_page: "5",
-    });
-    if (process.env.OPENALEX_API_KEY) url.searchParams.set("api_key", process.env.OPENALEX_API_KEY);
-    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const { results } = await response.json();
-    if (!Array.isArray(results)) throw new Error("Invalid OpenAlex response");
-    const papers = results.filter(work =>
-      typeof work?.display_name === "string" && work.display_name.trim() &&
-      typeof work.doi === "string" && /^https:\/\/doi\.org\/10\.\d{4,9}\/[^\s<>]+$/i.test(work.doi),
-    ).slice(0, 3).map(work => ({
-      title: work.display_name.replace(/\s+/g, " ").trim(),
-      doi: work.doi,
-    }));
+    const papers = openAlexPapers(await searchOpenAlexWorks(query, 5));
     return { status: papers.length ? "openalex" : "no-results", papers };
   } catch (error) {
     console.warn("OpenAlex search failed:", error.name);
     return { status: "openalex-error" };
   }
+}
+
+async function searchOpenAlexWorks(query, limit) {
+  const url = new URL("https://api.openalex.org/works");
+  url.search = new URLSearchParams({
+    search: query,
+    filter: "has_doi:true,type:article",
+    select: "display_name,doi,abstract_inverted_index",
+    per_page: String(limit),
+  });
+  if (process.env.OPENALEX_API_KEY) url.searchParams.set("api_key", process.env.OPENALEX_API_KEY);
+  const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const { results } = await response.json();
+  if (!Array.isArray(results)) throw new Error("Invalid OpenAlex response");
+  return results.filter(work => typeof work?.display_name === "string" && work.display_name.trim() &&
+    typeof work.doi === "string" && /^https:\/\/doi\.org\/10\.\d{4,9}\/[^\s<>]+$/i.test(work.doi));
+}
+
+function openAlexAbstract(work) {
+  const words = [];
+  for (const [word, positions] of Object.entries(work.abstract_inverted_index ?? {})) {
+    if (!Array.isArray(positions)) continue;
+    for (const position of positions) {
+      if (Number.isInteger(position) && position >= 0 && position < 10000) words[position] = word;
+    }
+  }
+  return words.join(" ");
+}
+
+function isAppleBrowningWork(work, abstract) {
+  const text = `${work.display_name} ${abstract}`;
+  return /\b(?:apples?|Malus domestica)\b/i.test(text.replace(/\b(?:cashew|custard|wood|rose) apples?\b/gi, "")) &&
+    /\bbrown(?:ing)?\b|\bpolyphenol oxidase\b/i.test(text);
+}
+
+function openAlexPapers(works) {
+  const seen = new Set();
+  return works.flatMap(work => {
+    const key = work.doi.toLowerCase();
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ title: work.display_name.replace(/\s+/g, " ").trim(), doi: work.doi }];
+  }).slice(0, 3);
 }
 
 function normalizeAttachments(raw) {
